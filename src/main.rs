@@ -198,6 +198,11 @@ struct Book {
     title: String,
 }
 
+#[derive(sqlx::FromRow, Deserialize, Serialize)]
+struct NewBook {
+    book_name: String,
+}
+
 // перечисление для обработки ошибок
 enum CustomError {
     BadRequest,
