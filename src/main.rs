@@ -43,10 +43,10 @@ async fn main(){
     .route("/api/v1/author/:author_id", get(get_author_name))
     // PUT запрос на изменение имени атора
     .route("/api/v1/author/:author_id", put(update_author_name))
-    // DELETE запрос на удаление автора
-    .route("/api/v1/author/:author_id", delete(delete_author))
     // POST запрос на создание автора
     .route("/api/v1/author", post(add_author))    
+    // DELETE запрос на удаление автора
+    .route("/api/v1/author/:author_id", delete(delete_author))    
     .layer(Extension(pool));  
    
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));   
