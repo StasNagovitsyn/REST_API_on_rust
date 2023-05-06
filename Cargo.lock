@@ -405,6 +405,7 @@ version = "0.1.0"
 dependencies = [
  "async-session",
  "axum",
+ "dotenv",
  "hyper",
  "serde",
  "serde_json",

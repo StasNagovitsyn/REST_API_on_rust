@@ -3,7 +3,7 @@
 //use axum::extract::Path;
 use axum::{
     routing::{get, post, put, delete},
-    http::StatusCode,
+    http::{StatusCode, header, HeaderMap},
     Router,
     response::IntoResponse,
     Json,    
@@ -14,17 +14,24 @@ use axum::{
 use sqlx::postgres::{PgPoolOptions, PgRow, PgQueryResult};
 use sqlx::PgPool;
 
-
+use std::net::SocketAddrV4;
 
 use serde_json::{Value, json};
 
 use serde::{Deserialize, Serialize};
 
-use std::net::SocketAddr;
+use std::net::{Ipv4Addr, SocketAddr};
+
+use dotenv::dotenv;
 
 
 #[tokio::main]
-async fn main(){         
+async fn main(){       
+    
+    dotenv().ok();    
+
+    let ip = std::env::var("IP").expect("Переменная IP не найдена"); 
+    let socet: SocketAddrV4 = ip.parse().expect("Не смог распарсить IP и socet");  
 
     let pool = PgPoolOptions::new()
         .max_connections(50)
@@ -42,14 +49,15 @@ async fn main(){
     // GET запрос на получение книг по author_id автора
     .route("/api/v1/author/:author_id", get(get_author_name))
     // PUT запрос на изменение имени атора
-    .route("/api/v1/author/:author_id", put(update_author_name))
+    .route("/api/v1/author", put(update_author_name))
     // POST запрос на создание автора
     .route("/api/v1/author", post(add_author))    
     // DELETE запрос на удаление автора
     .route("/api/v1/author/:author_id", delete(delete_author))    
-    .layer(Extension(pool));  
-   
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));   
+    .layer(Extension(pool));      
+
+    let addr = SocketAddr::from(socet);   
+    
     axum::Server::bind(&addr)
         .serve(app.into_make_service())
         .await
@@ -62,8 +70,10 @@ async fn hello() -> &'static str{
 }
 
 // POST запрос: добывить нового автора
-async fn  add_author(Extension(pool): Extension<PgPool>, Json(author_name): Json<NewAuthor> ) -> Result<(StatusCode, Json<NewAuthor>), CustomError>{    
+async fn  add_author(Extension(pool): Extension<PgPool>, Json(author_name): Json<NewAuthor> ) -> Result<(StatusCode,HeaderMap, Json<NewAuthor>), CustomError>{    
  
+   
+
     if author_name.author_name.is_empty() {
         return Err(CustomError::BadRequest)
     }
@@ -78,7 +88,10 @@ async fn  add_author(Extension(pool): Extension<PgPool>, Json(author_name): Json
             CustomError::AuthorIsRepeats
         })?;    
             
-    Ok((StatusCode::CREATED, Json(author_name)))                
+        let mut headers = HeaderMap::new();
+        headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
+
+    Ok((StatusCode::CREATED, headers, Json(author_name)))                
 } 
 
 
@@ -91,13 +104,15 @@ async fn get_authors(Extension(pool): Extension<PgPool>) -> impl IntoResponse {
         .fetch_all(&pool)
         .await
         .unwrap();
-
-    (StatusCode::OK, Json(list_authors))
+       
+    (StatusCode::OK, [(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")], Json(list_authors))  
 }
 
-// PUT запрос: изменение имени автора по id
-async fn update_author_name(Path(author_id): Path<i32>, Extension(pool): Extension<PgPool>, Json(update_author): Json<NewAuthor>) -> Result<(StatusCode, Json<NewAuthor>), CustomError> {
-       
+// PUT запрос: изменение имени автора по id //
+async fn update_author_name(Path(author_id): Path<i32>, Extension(pool): Extension<PgPool>, Json(update_author): Json<NewAuthor>) -> Result<(StatusCode, HeaderMap, Json<NewAuthor>), CustomError> {
+
+   // sqlx::PgPool::begin(&pool).await.unwrap();
+
     let _find: Author = sqlx::query_as("SELECT * FROM authors WHERE authors_id=$1")
        .bind(author_id)
        .fetch_one(&pool)
@@ -116,17 +131,24 @@ async fn update_author_name(Path(author_id): Path<i32>, Extension(pool): Extensi
         .map_err(|_| {
              CustomError::InternalServerError
         }); 
+
+    let mut headers = HeaderMap::new();
+    headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
+
+    
         
-    Ok((StatusCode::OK, Json(update_author)))        
+    Ok((StatusCode::OK, headers, Json(update_author)))        
     
  }
 
 // DELETE запрос: удаление автора по id
-async fn delete_author(Path(author_id): Path<i32>, Extension(pool): Extension<PgPool>) -> Result<(StatusCode, Json<Value>), CustomError> {
+async fn delete_author(Path(author_id): Path<i32>, Extension(pool): Extension<PgPool>) -> Result<(StatusCode, HeaderMap, Json<Value>), CustomError> {
        
+    let mut transaction = pool.begin().await.expect("транзакция не открыта");
+
     let _find: Author = sqlx::query_as("SELECT * FROM authors WHERE authors_id=$1")
         .bind(author_id)
-        .fetch_one(&pool)
+        .fetch_one(&transaction)
         .await
         .map_err(|_| {
             CustomError::AuthorNotFound            
@@ -142,11 +164,14 @@ async fn delete_author(Path(author_id): Path<i32>, Extension(pool): Extension<Pg
             CustomError::AuthorNotFound
          })?; 
  
-     Ok((StatusCode::OK, Json(json!({"msg": "Author Deleted"}))))
+    let mut headers = HeaderMap::new();
+    headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
+
+     Ok((StatusCode::OK, headers, Json(json!({"msg": "Author Deleted"}))))
  }
 
 // GET запрос: поиск автора по имени
-async fn search_author(  Extension(pool): Extension<PgPool>, Query(query): Query<NewAuthor>) -> Result<Json<Author>, CustomError> {
+async fn search_author(  Extension(pool): Extension<PgPool>, Query(query): Query<NewAuthor>) -> Result<(HeaderMap, Json<Author>), CustomError> {
     
     let sql = "SELECT * FROM authors WHERE name=$1".to_string();   
  
@@ -158,11 +183,14 @@ async fn search_author(  Extension(pool): Extension<PgPool>, Query(query): Query
             CustomError::AuthorNotFound
          })?; 
  
-     Ok(Json(author))
+    let mut headers = HeaderMap::new();
+    headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
+
+    Ok((headers, Json(author)))
  }
 
 // GET запрос: получение атора по id
-async fn get_author_name(Path(author_id): Path<i32>, Extension(pool): Extension<PgPool>) -> Result<Json<Author>, CustomError> {
+async fn get_author_name(Path(author_id): Path<i32>, Extension(pool): Extension<PgPool>) -> Result<(HeaderMap, Json<Author>), CustomError> {
   
     let sql = "SELECT * FROM authors WHERE authors_id=$1".to_string();
 
@@ -173,8 +201,11 @@ async fn get_author_name(Path(author_id): Path<i32>, Extension(pool): Extension<
         .map_err(|_| {
             CustomError::AuthorNotFound
         })?;
-
-    Ok(Json(author))
+    
+    let mut headers = HeaderMap::new();
+    headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
+    
+    Ok((headers, Json(author)))
 }
 
 

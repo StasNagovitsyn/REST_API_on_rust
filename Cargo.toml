@@ -13,4 +13,5 @@ async-session = "3.0.0"
 hyper = "0.14.23"
 serde_json = "1.0.91"
 serde = "1.0.152" 
+dotenv = "0.15.0"
 
