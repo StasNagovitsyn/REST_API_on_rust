@@ -49,7 +49,7 @@ async fn main(){
     // GET запрос на получение книг по author_id автора
     .route("/api/v1/author/:author_id", get(get_author_name))
     // PUT запрос на изменение имени атора
-    .route("/api/v1/author", put(update_author_name))
+    .route("/api/v1/author/:author_id", put(update_author_name))
     // POST запрос на создание автора
     .route("/api/v1/author", post(add_author))    
     // DELETE запрос на удаление автора
