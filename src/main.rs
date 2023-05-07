@@ -180,12 +180,9 @@ async fn delete_author(Path(author_id): Path<i32>, Extension(pool): Extension<Pg
 // GET запрос: поиск автора по имени
 async fn search_author(  Extension(pool): Extension<PgPool>, Query(query): Query<NewAuthor>) -> Result<(StatusCode, HeaderMap, Json<Vec<Author>>), CustomError>  { 
     
-    let mut sql = "SELECT * FROM authors WHERE name LIKE '".to_string();   //name=$1 LIKE '$1%'
+    let mut sql = "SELECT * FROM authors WHERE name LIKE '".to_string();   
     sql.push_str(&query.author_name);
     sql.push_str("%'");
- 
-    // println!("{}", sql);
-    println!("{}", &sql);
 
     let author: Vec<Author> = sqlx::query_as::<_, Author>(&sql)        
          //.bind(&query.author_name)
