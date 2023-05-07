@@ -12,7 +12,7 @@ use axum::{
 };
 
 use sqlx::postgres::{PgPoolOptions, PgRow, PgQueryResult};
-use sqlx::PgPool;
+use sqlx::{PgPool, query};
 
 use std::net::SocketAddrV4;
 
@@ -111,26 +111,58 @@ async fn get_authors(Extension(pool): Extension<PgPool>) -> impl IntoResponse {
 // PUT запрос: изменение имени автора по id //
 async fn update_author_name(Path(author_id): Path<i32>, Extension(pool): Extension<PgPool>, Json(update_author): Json<NewAuthor>) -> Result<(StatusCode, HeaderMap, Json<NewAuthor>), CustomError> {
 
-   // sqlx::PgPool::begin(&pool).await.unwrap();
+   println!("1");
+   let mut transaction = pool.begin().await.unwrap();
 
-    let _find: Author = sqlx::query_as("SELECT * FROM authors WHERE authors_id=$1")
-       .bind(author_id)
-       .fetch_one(&pool)
-       .await
-       .map_err(|_| {
+   println!("2");
+
+   let _ = sqlx::query("SELECT * FROM authors WHERE authors_id=$1")        
+         .bind(author_id)
+         .execute(&mut transaction)         
+         .await
+         .map_err(|_| {
             CustomError::AuthorNotFound
-       })?;
-        
+         })?;
+
+   println!("3"); 
+    // query!(
+    //     r#"SELECT * FROM authors WHERE authors_id=$1"#,
+    //     author_id)
+    // .execute(&mut *transaction)
+    // .await?; 
+    println!("4");
     let sql = "UPDATE authors SET name=$1 WHERE authors_id=$2".to_string();
-            
+    println!("5");
     let _ = sqlx::query(&sql)
         .bind(&update_author.author_name)
         .bind(author_id)
-        .execute(&pool)         
+        .execute(&mut transaction)         
         .await
         .map_err(|_| {
              CustomError::InternalServerError
         }); 
+        println!("6");
+   transaction.commit().await.unwrap();
+
+
+    // let _find: Author = sqlx::query_as("SELECT * FROM authors WHERE authors_id=$1")
+    //    .bind(author_id)
+    //    .fetch_one(&pool)
+    //    .await
+    //    .map_err(|_| {
+    //         CustomError::AuthorNotFound
+    //    })?;
+        
+    // let sql = "UPDATE authors SET name=$1 WHERE authors_id=$2".to_string();
+            
+    // let _ = sqlx::query(&sql)
+    //     .bind(&update_author.author_name)
+    //     .bind(author_id)
+    //     .execute(&pool)         
+    //     .await
+    //     .map_err(|_| {
+    //          CustomError::InternalServerError
+    //     }); 
 
     let mut headers = HeaderMap::new();
     headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
@@ -144,11 +176,10 @@ async fn update_author_name(Path(author_id): Path<i32>, Extension(pool): Extensi
 // DELETE запрос: удаление автора по id
 async fn delete_author(Path(author_id): Path<i32>, Extension(pool): Extension<PgPool>) -> Result<(StatusCode, HeaderMap, Json<Value>), CustomError> {
        
-    let mut transaction = pool.begin().await.expect("транзакция не открыта");
-
+    
     let _find: Author = sqlx::query_as("SELECT * FROM authors WHERE authors_id=$1")
         .bind(author_id)
-        .fetch_one(&transaction)
+        .fetch_one(&pool)
         .await
         .map_err(|_| {
             CustomError::AuthorNotFound            
