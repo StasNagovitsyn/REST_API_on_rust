@@ -131,9 +131,7 @@ async fn update_author_name(Path(author_id): Path<i32>, Extension(pool): Extensi
         .map_err(|_| {
              CustomError::InternalServerError
         }); 
-    println!("efwf");  
-    println!("efwfdwsvde");   
-
+    
     // закрываем транзакцию    
     transaction.commit().await.unwrap();  
 
