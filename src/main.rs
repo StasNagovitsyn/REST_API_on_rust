@@ -70,9 +70,7 @@ async fn hello() -> &'static str{
 }
 
 // POST запрос: добывить нового автора
-async fn  add_author(Extension(pool): Extension<PgPool>, Json(author_name): Json<NewAuthor> ) -> Result<(StatusCode,HeaderMap, Json<NewAuthor>), CustomError>{    
- 
-   
+async fn  add_author(Extension(pool): Extension<PgPool>, Json(author_name): Json<NewAuthor> ) -> Result<(StatusCode,HeaderMap, Json<NewAuthor>), CustomError>{       
 
     if author_name.author_name.is_empty() {
         return Err(CustomError::BadRequest)
@@ -88,8 +86,9 @@ async fn  add_author(Extension(pool): Extension<PgPool>, Json(author_name): Json
             CustomError::AuthorIsRepeats
         })?;    
             
-        let mut headers = HeaderMap::new();
-        headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
+    // отправляю дополнительно заголовок, для того чтобы браузер не блокировал входящий json
+    let mut headers = HeaderMap::new();
+    headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
 
     Ok((StatusCode::CREATED, headers, Json(author_name)))                
 } 
@@ -98,7 +97,7 @@ async fn  add_author(Extension(pool): Extension<PgPool>, Json(author_name): Json
 // GET запрос: получить список всех авторов
 async fn get_authors(Extension(pool): Extension<PgPool>) -> impl IntoResponse {
        
-   let sql = "SELECT * FROM authors".to_string();
+    let sql = "SELECT * FROM authors".to_string();
 
     let list_authors = sqlx::query_as::<_, Author>(&sql)
         .fetch_all(&pool)
@@ -110,76 +109,50 @@ async fn get_authors(Extension(pool): Extension<PgPool>) -> impl IntoResponse {
 
 // PUT запрос: изменение имени автора по id //
 async fn update_author_name(Path(author_id): Path<i32>, Extension(pool): Extension<PgPool>, Json(update_author): Json<NewAuthor>) -> Result<(StatusCode, HeaderMap, Json<NewAuthor>), CustomError> {
+  
+   // открываем транзакцию
+   let mut transaction = pool.begin().await.unwrap();   
 
-   println!("1");
-//    let mut transaction = pool.begin().await.unwrap();
-
-//    println!("2");
-
-//    let _ = sqlx::query("SELECT * FROM authors WHERE authors_id=$1")        
-//          .bind(author_id)
-//          .execute(&mut transaction)         
-//          .await
-//          .map_err(|_| {
-//             CustomError::AuthorNotFound
-//          })?;
-
-//    println!("3"); 
-    // query!(
-    //     r#"SELECT * FROM authors WHERE authors_id=$1"#,
-    //     author_id)
-    // .execute(&mut *transaction)
-    // .await?; 
-//     println!("4");
-//     let sql = "UPDATE authors SET name=$1 WHERE authors_id=$2".to_string();
-//     println!("5");
-//     let _ = sqlx::query(&sql)
-//         .bind(&update_author.author_name)
-//         .bind(author_id)
-//         .execute(&mut transaction)         
-//         .await
-//         .map_err(|_| {
-//              CustomError::InternalServerError
-//         }); 
-//         println!("6");
-//    transaction.commit().await.unwrap();
-
-
-    let _find: Author = sqlx::query_as("SELECT * FROM authors WHERE authors_id=$1")
-       .bind(author_id)
-       .fetch_one(&pool)
-       .await
-       .map_err(|_| {
+   let _ = sqlx::query("SELECT * FROM authors WHERE authors_id=$1")        
+         .bind(author_id)
+         .execute(&mut transaction)         
+         .await
+         .map_err(|_| {
             CustomError::AuthorNotFound
-       })?;
-        
+         })?;
+  
     let sql = "UPDATE authors SET name=$1 WHERE authors_id=$2".to_string();
-            
+   
     let _ = sqlx::query(&sql)
         .bind(&update_author.author_name)
         .bind(author_id)
-        .execute(&pool)         
+        .execute(&mut transaction)         
         .await
         .map_err(|_| {
              CustomError::InternalServerError
         }); 
+    println!("efwf");  
+    println!("efwfdwsvde");   
 
+    // закрываем транзакцию    
+    transaction.commit().await.unwrap();  
+
+    // отправляю дополнительно заголовок, для того чтобы браузер не блокировал входящий json
     let mut headers = HeaderMap::new();
-    headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
-
-    
-        
-    Ok((StatusCode::OK, headers, Json(update_author)))        
-    
+    headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());      
+      
+    Ok((StatusCode::OK, headers, Json(update_author)))
  }
 
 // DELETE запрос: удаление автора по id
 async fn delete_author(Path(author_id): Path<i32>, Extension(pool): Extension<PgPool>) -> Result<(StatusCode, HeaderMap, Json<Value>), CustomError> {
-       
+
+    // открываем транзакцию
+    let mut transaction = pool.begin().await.unwrap();    
     
     let _find: Author = sqlx::query_as("SELECT * FROM authors WHERE authors_id=$1")
         .bind(author_id)
-        .fetch_one(&pool)
+        .fetch_one(&mut transaction)
         .await
         .map_err(|_| {
             CustomError::AuthorNotFound            
@@ -189,16 +162,20 @@ async fn delete_author(Path(author_id): Path<i32>, Extension(pool): Extension<Pg
  
     sqlx::query(&sql)        
          .bind(author_id)
-         .execute(&pool)         
+         .execute(&mut transaction)         
          .await
          .map_err(|_| {
             CustomError::AuthorNotFound
          })?; 
  
+    // закрываем транзакцию    
+    transaction.commit().await.unwrap();
+
+    // отправляю дополнительно заголовок, для того чтобы браузер не блокировал входящий json
     let mut headers = HeaderMap::new();
     headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
 
-     Ok((StatusCode::OK, headers, Json(json!({"msg": "Author Deleted"}))))
+    Ok((StatusCode::OK, headers, Json(json!({"msg": "Author Deleted"}))))
  }
 
 // GET запрос: поиск автора по имени
@@ -214,6 +191,7 @@ async fn search_author(  Extension(pool): Extension<PgPool>, Query(query): Query
             CustomError::AuthorNotFound
          })?; 
  
+    // отправляю дополнительно заголовок, для того чтобы браузер не блокировал входящий json
     let mut headers = HeaderMap::new();
     headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
 
@@ -233,6 +211,7 @@ async fn get_author_name(Path(author_id): Path<i32>, Extension(pool): Extension<
             CustomError::AuthorNotFound
         })?;
     
+    // отправляю дополнительно заголовок, для того чтобы браузер не блокировал входящий json
     let mut headers = HeaderMap::new();
     headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
     
@@ -276,14 +255,27 @@ enum CustomError {
 // реализуем трейт IntoResponse для enum CustomError
 impl IntoResponse for CustomError {
     fn into_response(self) -> axum::response::Response {
-        let (status, error_message) = match self {
+        let (status, HeaderMap, error_message) = match self {
             Self::InternalServerError => (
                 StatusCode::INTERNAL_SERVER_ERROR,
+                [(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")],
                 "Internal Server Error",
             ),
-            Self::BadRequest=> (StatusCode::BAD_REQUEST, "Bad Request"),
-            Self::AuthorNotFound => (StatusCode::NOT_FOUND, "Author Not Found"),
-            Self::AuthorIsRepeats => (StatusCode::NOT_IMPLEMENTED, "The author repeats"),            
+            Self::BadRequest=> (
+                StatusCode::BAD_REQUEST, 
+                [(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")], 
+                "Bad Request"
+            ),
+            Self::AuthorNotFound => (
+                StatusCode::NOT_FOUND, 
+                [(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")],
+                "Author Not Found"
+            ),
+            Self::AuthorIsRepeats => (
+                StatusCode::NOT_IMPLEMENTED, 
+                [(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")],
+                "The author repeats"
+            ),            
         };
         (status, Json(json!({"error": error_message}))).into_response()
     }
