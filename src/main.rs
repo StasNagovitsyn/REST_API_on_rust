@@ -113,16 +113,16 @@ async fn update_author_name(Path(author_id): Path<i32>, Extension(pool): Extensi
    // открываем транзакцию
    let mut transaction = pool.begin().await.unwrap();   
 
-   let _ = sqlx::query("SELECT * FROM authors WHERE authors_id=$1")        
-         .bind(author_id)
-         .execute(&mut transaction)         
-         .await
-         .map_err(|_| {
+    let _find: Author = sqlx::query_as("SELECT * FROM authors WHERE authors_id=$1")
+       .bind(author_id)
+       .fetch_one(&pool)
+       .await
+       .map_err(|_| {
             CustomError::AuthorNotFound
-         })?;
-  
+       })?;
+        
     let sql = "UPDATE authors SET name=$1 WHERE authors_id=$2".to_string();
-   
+            
     let _ = sqlx::query(&sql)
         .bind(&update_author.author_name)
         .bind(author_id)
@@ -131,11 +131,7 @@ async fn update_author_name(Path(author_id): Path<i32>, Extension(pool): Extensi
         .map_err(|_| {
              CustomError::InternalServerError
         }); 
-    
-    // закрываем транзакцию    
-    transaction.commit().await.unwrap();  
 
-    // отправляю дополнительно заголовок, для того чтобы браузер не блокировал входящий json
     let mut headers = HeaderMap::new();
     headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());      
       
@@ -163,7 +159,7 @@ async fn delete_author(Path(author_id): Path<i32>, Extension(pool): Extension<Pg
          .execute(&mut transaction)         
          .await
          .map_err(|_| {
-            CustomError::AuthorNotFound
+            CustomError::InternalServerError
          })?; 
  
     // закрываем транзакцию    
@@ -177,23 +173,25 @@ async fn delete_author(Path(author_id): Path<i32>, Extension(pool): Extension<Pg
  }
 
 // GET запрос: поиск автора по имени
-async fn search_author(  Extension(pool): Extension<PgPool>, Query(query): Query<NewAuthor>) -> Result<(HeaderMap, Json<Author>), CustomError> {
+async fn search_author(  Extension(pool): Extension<PgPool>, Query(query): Query<NewAuthor>) -> Result<(StatusCode, HeaderMap, Json<Vec<Author>>), CustomError>  { 
     
-    let sql = "SELECT * FROM authors WHERE name=$1".to_string();   
- 
-    let author = sqlx::query_as::<_, Author>(&sql)        
-         .bind(query.author_name)
-         .fetch_one(&pool)         
-         .await
+    let mut sql = "SELECT * FROM authors WHERE name LIKE '".to_string();   
+    sql.push_str(&query.author_name);
+    sql.push_str("%'");
+
+    let author: Vec<Author> = sqlx::query_as::<_, Author>(&sql)        
+         //.bind(&query.author_name)
+         .fetch_all(&pool)         
+         .await         
          .map_err(|_| {
             CustomError::AuthorNotFound
          })?; 
  
-    // отправляю дополнительно заголовок, для того чтобы браузер не блокировал входящий json
     let mut headers = HeaderMap::new();
     headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
 
-    Ok((headers, Json(author)))
+    Ok((StatusCode::OK,headers, Json(author)))
+    
  }
 
 // GET запрос: получение атора по id
@@ -253,29 +251,16 @@ enum CustomError {
 // реализуем трейт IntoResponse для enum CustomError
 impl IntoResponse for CustomError {
     fn into_response(self) -> axum::response::Response {
-        let (status, HeaderMap, error_message) = match self {
+        let (status, error_message) = match self {
             Self::InternalServerError => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                [(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")],
                 "Internal Server Error",
             ),
-            Self::BadRequest=> (
-                StatusCode::BAD_REQUEST, 
-                [(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")], 
-                "Bad Request"
-            ),
-            Self::AuthorNotFound => (
-                StatusCode::NOT_FOUND, 
-                [(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")],
-                "Author Not Found"
-            ),
-            Self::AuthorIsRepeats => (
-                StatusCode::NOT_IMPLEMENTED, 
-                [(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")],
-                "The author repeats"
-            ),            
+            Self::BadRequest=> (StatusCode::BAD_REQUEST, "Bad Request"),
+            Self::AuthorNotFound => (StatusCode::NOT_FOUND, "Author Not Found"),
+            Self::AuthorIsRepeats => (StatusCode::NOT_IMPLEMENTED, "The author repeats"),            
         };
-        (status, Json(json!({"error": error_message}))).into_response()
+        (status, headers, Json(json!({"error": error_message}))).into_response()
     }
 }
 
