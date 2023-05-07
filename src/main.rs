@@ -114,7 +114,7 @@ async fn update_author_name(Path(author_id): Path<i32>, Extension(pool): Extensi
    println!("1");
    let mut transaction = pool.begin().await.unwrap();
 
-   println!("2");
+//    println!("2");
 
    let _ = sqlx::query("SELECT * FROM authors WHERE authors_id=$1")        
          .bind(author_id)
