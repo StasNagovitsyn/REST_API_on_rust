@@ -24,6 +24,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 
 use dotenv::dotenv;
 
+mod lib;
 
 #[tokio::main]
 async fn main(){       
@@ -108,21 +109,21 @@ async fn get_authors(Extension(pool): Extension<PgPool>) -> impl IntoResponse {
 }
 
 // PUT запрос: изменение имени автора по id //
-async fn update_author_name(Path(author_id): Path<i32>, Extension(pool): Extension<PgPool>, Json(update_author): Json<NewAuthor>) -> Result<(StatusCode, HeaderMap, Json<NewAuthor>), CustomError> {
+async fn update_author_name(Path(author_id): Path<i32>, Extension(pool): Extension<PgPool>, Json(update_author): Json<NewAuthor>) -> Result<(StatusCode, HeaderMap), CustomError> {
   
    // открываем транзакцию
    let mut transaction = pool.begin().await.unwrap();   
 
     let _find: Author = sqlx::query_as("SELECT * FROM authors WHERE authors_id=$1")
        .bind(author_id)
-       .fetch_one(&pool)
+       .fetch_one(&mut transaction)
        .await
        .map_err(|_| {
             CustomError::AuthorNotFound
        })?;
         
-    let sql = "UPDATE authors SET name=$1 WHERE authors_id=$2".to_string();
-            
+    let sql = "UPDATE authors SET name=$1 WHERE authors_id=$2".to_string();   
+
     let _ = sqlx::query(&sql)
         .bind(&update_author.author_name)
         .bind(author_id)
@@ -130,12 +131,15 @@ async fn update_author_name(Path(author_id): Path<i32>, Extension(pool): Extensi
         .await
         .map_err(|_| {
              CustomError::InternalServerError
-        }); 
+        })?; 
+
+   // закрываем транзакцию    
+   transaction.commit().await.unwrap();
 
     let mut headers = HeaderMap::new();
     headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());      
       
-    Ok((StatusCode::OK, headers, Json(update_author)))
+    Ok((StatusCode::OK, headers))
  }
 
 // DELETE запрос: удаление автора по id
@@ -173,25 +177,32 @@ async fn delete_author(Path(author_id): Path<i32>, Extension(pool): Extension<Pg
  }
 
 // GET запрос: поиск автора по имени
-async fn search_author(  Extension(pool): Extension<PgPool>, Query(query): Query<NewAuthor>) -> Result<(StatusCode, HeaderMap, Json<Vec<Author>>), CustomError>  { 
+async fn search_author(  Extension(pool): Extension<PgPool>, Query(query): Query<NewAuthor>) ->  Result<(StatusCode, HeaderMap, Json<Vec<Author>>), CustomError> { 
     
-    let mut sql = "SELECT * FROM authors WHERE name LIKE '".to_string();   
-    sql.push_str(&query.author_name);
-    sql.push_str("%'");
+    // sql-запрос
+    let mut sql = "SELECT * FROM authors WHERE name LIKE ".to_string(); 
+    // пропускаем через функцию escape_internal параметр запроса и URL, чтобы обезопаситься от SQLi
+    let query_param = lib::escape_internal(&query.author_name, false); 
+    // добавляем получившийся параметр запроса к SQL-запросу
+    sql.push_str(&query_param);      
 
-    let author: Vec<Author> = sqlx::query_as::<_, Author>(&sql)        
-         //.bind(&query.author_name)
-         .fetch_all(&pool)         
-         .await         
-         .map_err(|_| {
-            CustomError::AuthorNotFound
-         })?; 
- 
+    let author: Vec<Author> = sqlx::query_as::<_, Author>(&sql)          
+        .fetch_all(&pool)
+        .await         
+        .map_err(|_| {
+           CustomError::InternalServerError
+        })?;     
+    
+    // если в БД нет совпадений, то вернём ошибку об отсутствии таких авторов
+    if author.is_empty() {
+        return Err(CustomError::AuthorNotFound)
+    }   
+
+    // отправляю дополнительно заголовок, для того чтобы браузер не блокировал входящий json
     let mut headers = HeaderMap::new();
     headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
-
-    Ok((StatusCode::OK,headers, Json(author)))
     
+    Ok((StatusCode::OK,headers, Json(author)))
  }
 
 // GET запрос: получение атора по id
@@ -251,14 +262,28 @@ enum CustomError {
 // реализуем трейт IntoResponse для enum CustomError
 impl IntoResponse for CustomError {
     fn into_response(self) -> axum::response::Response {
+    
+    // отправляю дополнительно заголовок, для того чтобы браузер не блокировал входящий json
+    let mut headers = HeaderMap::new();
+    headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
+
         let (status, error_message) = match self {
             Self::InternalServerError => (
-                StatusCode::INTERNAL_SERVER_ERROR,
+                StatusCode::INTERNAL_SERVER_ERROR,                
                 "Internal Server Error",
             ),
-            Self::BadRequest=> (StatusCode::BAD_REQUEST, "Bad Request"),
-            Self::AuthorNotFound => (StatusCode::NOT_FOUND, "Author Not Found"),
-            Self::AuthorIsRepeats => (StatusCode::NOT_IMPLEMENTED, "The author repeats"),            
+            Self::BadRequest=> (
+                StatusCode::BAD_REQUEST,                  
+                "Bad Request"
+            ),
+            Self::AuthorNotFound => (
+                StatusCode::NOT_FOUND,                 
+                "Author Not Found"
+            ),
+            Self::AuthorIsRepeats => (
+                StatusCode::NOT_IMPLEMENTED, 
+                "The author repeats"
+            ),            
         };
         (status, headers, Json(json!({"error": error_message}))).into_response()
     }
