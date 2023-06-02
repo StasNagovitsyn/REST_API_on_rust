@@ -3,27 +3,24 @@
 //use axum::extract::Path;
 use axum::{
     routing::{get, post, put, delete},
-    http::{StatusCode, header, HeaderMap},
+    http::{StatusCode, header, HeaderMap, Method},
     Router,
     response::IntoResponse,
     Json,    
     Extension,
-    extract::{Path, Query}, 
+    extract::{Path, Query, connect_info::IntoMakeServiceWithConnectInfo}, 
 };
 
+use hyper::header::{HeaderName, CONTENT_TYPE};
 use sqlx::postgres::{PgPoolOptions, PgRow, PgQueryResult};
 use sqlx::{PgPool, query};
-
 use std::net::SocketAddrV4;
-
 use serde_json::{Value, json};
-
 use serde::{Deserialize, Serialize};
-
 use std::net::{Ipv4Addr, SocketAddr};
-
 use dotenv::dotenv;
 
+//там функция escape_internal, чтобы обезопаситься от SQLi
 mod lib;
 
 #[tokio::main]
@@ -38,11 +35,16 @@ async fn main(){
         .max_connections(50)
         .connect("postgres://postgres:2670467@localhost/my_db")
         .await
-        .unwrap();
+        .unwrap();   
+  
 
     let app = Router::new()
     // тест. Hello? world
     .route("/", get(hello))    
+    // .layer(tower_http::cors::CorsLayer::new()
+        // .allow_origin("*".parse::<axum::http::HeaderValue>().unwrap())
+        // .allow_headers([CONTENT_TYPE])
+        // .allow_methods([axum::http::Method::GET]), )
     // GET запрос на получение всех авторов
     .route("/api/v1/authors", get(get_authors))
     // GET запрос на поиск автора по имени
@@ -52,10 +54,15 @@ async fn main(){
     // PUT запрос на изменение имени атора
     .route("/api/v1/author/:author_id", put(update_author_name))
     // POST запрос на создание автора
-    .route("/api/v1/author", post(add_author))    
+    .route("/api/v1/author", post(add_author)) 
     // DELETE запрос на удаление автора
-    .route("/api/v1/author/:author_id", delete(delete_author))    
-    .layer(Extension(pool));      
+    .route("/api/v1/author/:author_id", delete(delete_author))     
+    .layer(Extension(pool))
+    .layer(tower_http::cors::CorsLayer::new()
+        .allow_origin("*".parse::<axum::http::HeaderValue>().unwrap())
+        .allow_headers([CONTENT_TYPE])
+        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::PUT]), );
+       
 
     let addr = SocketAddr::from(socet);   
     
@@ -66,12 +73,15 @@ async fn main(){
 
 }
 
-async fn hello() -> &'static str{    
-    "Hello, world"
+async fn hello() -> Json<String>{    
+    let message = "Hello, world".to_string();
+    Json(message)
 }
 
+
+
 // POST запрос: добывить нового автора
-async fn  add_author(Extension(pool): Extension<PgPool>, Json(author_name): Json<NewAuthor> ) -> Result<(StatusCode,HeaderMap, Json<NewAuthor>), CustomError>{       
+async fn  add_author(Extension(pool): Extension<PgPool>, Json(author_name): Json<NewAuthor> ) -> Result<(StatusCode, Json<NewAuthor>), CustomError>{       
 
     if author_name.author_name.is_empty() {
         return Err(CustomError::BadRequest)
@@ -87,13 +97,8 @@ async fn  add_author(Extension(pool): Extension<PgPool>, Json(author_name): Json
             CustomError::AuthorIsRepeats
         })?;    
             
-    // отправляю дополнительно заголовок, для того чтобы браузер не блокировал входящий json
-    let mut headers = HeaderMap::new();
-    headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
-
-    Ok((StatusCode::CREATED, headers, Json(author_name)))                
+    Ok((StatusCode::CREATED, Json(author_name)))
 } 
-
 
 // GET запрос: получить список всех авторов
 async fn get_authors(Extension(pool): Extension<PgPool>) -> impl IntoResponse {
@@ -105,11 +110,12 @@ async fn get_authors(Extension(pool): Extension<PgPool>) -> impl IntoResponse {
         .await
         .unwrap();
        
-    (StatusCode::OK, [(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")], Json(list_authors))  
+    //(StatusCode::OK, [(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")], Json(list_authors))  
+    (StatusCode::OK, Json(list_authors)) 
 }
 
 // PUT запрос: изменение имени автора по id //
-async fn update_author_name(Path(author_id): Path<i32>, Extension(pool): Extension<PgPool>, Json(update_author): Json<NewAuthor>) -> Result<(StatusCode, HeaderMap), CustomError> {
+async fn update_author_name(Path(author_id): Path<i32>, Extension(pool): Extension<PgPool>, Json(update_author): Json<NewAuthor>) -> Result<StatusCode, CustomError> {
   
    // открываем транзакцию
    let mut transaction = pool.begin().await.unwrap();   
@@ -136,14 +142,14 @@ async fn update_author_name(Path(author_id): Path<i32>, Extension(pool): Extensi
    // закрываем транзакцию    
    transaction.commit().await.unwrap();
 
-    let mut headers = HeaderMap::new();
-    headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());      
-      
-    Ok((StatusCode::OK, headers))
+    // let mut headers = HeaderMap::new();
+    // headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());            
+    //Ok((StatusCode::OK, headers))
+    Ok(StatusCode::OK)
  }
 
 // DELETE запрос: удаление автора по id
-async fn delete_author(Path(author_id): Path<i32>, Extension(pool): Extension<PgPool>) -> Result<(StatusCode, HeaderMap, Json<Value>), CustomError> {
+async fn delete_author(Path(author_id): Path<i32>, Extension(pool): Extension<PgPool>) -> Result<(StatusCode, Json<Value>), CustomError> {
 
     // открываем транзакцию
     let mut transaction = pool.begin().await.unwrap();    
@@ -170,14 +176,15 @@ async fn delete_author(Path(author_id): Path<i32>, Extension(pool): Extension<Pg
     transaction.commit().await.unwrap();
 
     // отправляю дополнительно заголовок, для того чтобы браузер не блокировал входящий json
-    let mut headers = HeaderMap::new();
-    headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
-
-    Ok((StatusCode::OK, headers, Json(json!({"msg": "Author Deleted"}))))
+    // let mut headers = HeaderMap::new();
+    // headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
+    // Ok((StatusCode::OK, headers, Json(json!({"msg": "Author Deleted"}))))
+    
+    Ok((StatusCode::OK, Json(json!({"msg": "Author Deleted"}))))
  }
 
 // GET запрос: поиск автора по имени
-async fn search_author(  Extension(pool): Extension<PgPool>, Query(query): Query<NewAuthor>) ->  Result<(StatusCode, HeaderMap, Json<Vec<Author>>), CustomError> { 
+async fn search_author(  Extension(pool): Extension<PgPool>, Query(query): Query<NewAuthor>) ->  Result<(StatusCode, Json<Vec<Author>>), CustomError> { 
     
     // sql-запрос
     let mut sql = "SELECT * FROM authors WHERE name LIKE ".to_string(); 
@@ -199,14 +206,14 @@ async fn search_author(  Extension(pool): Extension<PgPool>, Query(query): Query
     }   
 
     // отправляю дополнительно заголовок, для того чтобы браузер не блокировал входящий json
-    let mut headers = HeaderMap::new();
-    headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
-    
-    Ok((StatusCode::OK,headers, Json(author)))
+    // let mut headers = HeaderMap::new();
+    // headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());    
+    // Ok((StatusCode::OK,headers, Json(author)))
+    Ok((StatusCode::OK, Json(author)))
  }
 
 // GET запрос: получение атора по id
-async fn get_author_name(Path(author_id): Path<i32>, Extension(pool): Extension<PgPool>) -> Result<(HeaderMap, Json<Author>), CustomError> {
+async fn get_author_name(Path(author_id): Path<i32>, Extension(pool): Extension<PgPool>) -> Result<Json<Author>, CustomError> {
   
     let sql = "SELECT * FROM authors WHERE authors_id=$1".to_string();
 
@@ -219,10 +226,11 @@ async fn get_author_name(Path(author_id): Path<i32>, Extension(pool): Extension<
         })?;
     
     // отправляю дополнительно заголовок, для того чтобы браузер не блокировал входящий json
-    let mut headers = HeaderMap::new();
-    headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());
-    
-    Ok((headers, Json(author)))
+    // let mut headers = HeaderMap::new();
+    // headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());    
+    // Ok((headers, Json(author)))
+
+    Ok(Json(author))
 }
 
 
@@ -231,7 +239,6 @@ async fn get_author_name(Path(author_id): Path<i32>, Extension(pool): Extension<
 struct NewAuthor {
     author_name: String,
 }
-
 
 #[derive(sqlx::FromRow, Deserialize, Serialize)]
 struct Author {
