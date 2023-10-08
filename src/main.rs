@@ -55,6 +55,8 @@ async fn main(){
     .route("/api/v1/author/:author_id", put(update_author_name))
     // POST запрос на создание автора
     .route("/api/v1/author", post(add_author)) 
+    // POST запрос на создание автора
+    .route("/api/v1/author2", post(add_author_2)) 
     // DELETE запрос на удаление автора
     .route("/api/v1/author/:author_id", delete(delete_author))     
     .layer(Extension(pool))
@@ -98,6 +100,29 @@ async fn  add_author(Extension(pool): Extension<PgPool>, Json(author_name): Json
         })?;    
             
     Ok((StatusCode::CREATED, Json(author_name)))
+} 
+
+// POST2 запрос: добывить нового автора
+async fn  add_author_2(Extension(pool): Extension<PgPool>, Json(author): Json<NewAuthor2> ) -> Result<(StatusCode, Json<NewAuthor2>), CustomError>{       
+
+    if author.authors_name.is_empty() {
+        return Err(CustomError::BadRequest)
+    }
+
+    println!("author.authors_name = {}, author.adress = {}", author.authors_name, author.adress);
+
+    let sql = "INSERT INTO authors2(authors_name, adress) VALUES ($1, $2)".to_string();
+    
+    let _ = sqlx::query(&sql)
+        .bind(&author.authors_name)
+        .bind(&author.adress)
+        .execute(&pool)
+        .await
+        .map_err(|_| {
+            CustomError::AuthorIsRepeats
+        })?;    
+            
+    Ok((StatusCode::CREATED, Json(author)))
 } 
 
 // GET запрос: получить список всех авторов
@@ -238,6 +263,12 @@ async fn get_author_name(Path(author_id): Path<i32>, Extension(pool): Extension<
 #[derive(sqlx::FromRow, Deserialize, Serialize)]
 struct NewAuthor {
     author_name: String,
+}
+
+#[derive(sqlx::FromRow, Deserialize, Serialize)]
+struct NewAuthor2 {
+    authors_name: String,
+    adress: String,
 }
 
 #[derive(sqlx::FromRow, Deserialize, Serialize)]
