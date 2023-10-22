@@ -24,8 +24,8 @@ use dotenv::dotenv;
 mod lib;
 
 #[tokio::main]
-async fn main(){       
-    
+async fn main(){    
+
     dotenv().ok();    
 
     let ip = std::env::var("IP").expect("Переменная IP не найдена"); 
@@ -36,7 +36,7 @@ async fn main(){
         .connect("postgres://postgres:2670467@localhost/my_db")
         .await
         .unwrap();   
-  
+       
 
     let app = Router::new()
     // тест. Hello? world
@@ -79,8 +79,6 @@ async fn hello() -> Json<String>{
     let message = "Hello, world".to_string();
     Json(message)
 }
-
-
 
 // POST запрос: добывить нового автора
 async fn  add_author(Extension(pool): Extension<PgPool>, Json(author_name): Json<NewAuthor> ) -> Result<(StatusCode, Json<NewAuthor>), CustomError>{       
