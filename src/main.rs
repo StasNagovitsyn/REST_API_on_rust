@@ -1,4 +1,5 @@
 
+use anyhow::anyhow;
 //use axum::Extension;
 //use axum::extract::Path;
 use axum::{
@@ -23,20 +24,56 @@ use dotenv::dotenv;
 //там функция escape_internal, чтобы обезопаситься от SQLi
 mod lib;
 
+mod migrations {
+    use anyhow::anyhow;
+    use diesel::{PgConnection, Connection};
+
+    pub mod my_db {
+        use anyhow::anyhow;
+        use diesel_migrations::{EmbeddedMigrations, MigrationHarness};
+
+        pub const MIGRATIONS: EmbeddedMigrations = diesel_migrations::embed_migrations!("migrations");
+
+        pub fn apply(database_url: &str) -> anyhow::Result<()> {
+            let mut conn = super::migrations_connection(database_url)?;
+            conn.run_pending_migrations(MIGRATIONS).map_err(|e| anyhow!("running pending migrations: {e}"))?;
+            Ok(())
+        }
+    }
+
+    pub fn migrations_connection(database_url: &str) -> anyhow::Result<PgConnection> {
+        PgConnection::establish(database_url)
+            .map_err(|e| anyhow!("connecting to database: {e}"))
+    }
+}
+
 #[tokio::main]
-async fn main(){    
+async fn main() -> anyhow::Result<()> {    
+    dotenv().ok();
 
-    dotenv().ok();    
+    env_logger::init();
 
-    let ip = std::env::var("IP").expect("Переменная IP не найдена"); 
-    let socet: SocketAddrV4 = ip.parse().expect("Не смог распарсить IP и socet");  
+    let ip = std::env::var("IP").expect("Переменная IP не найдена");
+    let database_url = std::env::var("DATABASE_URL").expect("Переменная DATABASE_URL не найдена");
 
+    log::debug!("Applying 'my_db' migrations on '{database_url}'...");
+
+    migrations::my_db::apply(&database_url).map_err(|e| {
+        anyhow!("applying 'my_db' migrations on '{database_url}': {e}")
+    })?;
+
+    log::info!("Successfully applied 'my_db' migrations on '{database_url}'");
+
+    let socet: SocketAddrV4 = ip.parse().expect("Не смог распарсить IP и socet"); 
+
+    log::debug!("Creating connection pool to '{database_url}'...");
     let pool = PgPoolOptions::new()
         .max_connections(50)
-        .connect("postgres://postgres:2670467@localhost/my_db")
+        .connect(&database_url)
         .await
-        .unwrap();   
+        .unwrap();
        
+    log::info!("Successfully created connection pool to '{database_url}'");
 
     let app = Router::new()
     // тест. Hello? world
@@ -73,6 +110,7 @@ async fn main(){
         .await
         .unwrap(); 
 
+    Ok(())
 }
 
 async fn hello() -> Json<String>{    
