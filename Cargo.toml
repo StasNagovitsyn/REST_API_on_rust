@@ -17,4 +17,6 @@ dotenv = "0.15.0"
 tower-http = {  version = "0.3.0", features = ["cors"] }
 diesel = { version = "2.1.0", features = ["postgres"] }
 diesel_migrations = "2.1.0"
-
+log = "0.4.20"
+anyhow = "1.0.75"
+env_logger = "0.10.0"
