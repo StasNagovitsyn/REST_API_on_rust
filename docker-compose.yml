@@ -3,10 +3,11 @@ version: "3"
 services:
 
   db:
-    image: postgres:16
-    ports: [ "${DBPORT:-5432}:5432" ]
+    image: postgres:13
+    ports: 
+      - "123:5432"
     environment:
-      POSTGRES_USER: ${DBUSER:-postgres}
-      POSTGRES_PASSWORD: ${DBPASS:-2670467}
-      POSTGRES_DB: ${DBNAME:-my_db}
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=11111111
+      - POSTGRES_DB=my_db
     restart: "always"

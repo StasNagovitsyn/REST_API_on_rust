@@ -39,12 +39,16 @@ mod migrations {
             conn.run_pending_migrations(MIGRATIONS).map_err(|e| anyhow!("running pending migrations: {e}"))?;
             Ok(())
         }
-    }
+    }    
 
     pub fn migrations_connection(database_url: &str) -> anyhow::Result<PgConnection> {
         PgConnection::establish(database_url)
             .map_err(|e| anyhow!("connecting to database: {e}"))
     }
+
+    
+
+   
 }
 
 #[tokio::main]
@@ -54,6 +58,7 @@ async fn main() -> anyhow::Result<()> {
     env_logger::init();
 
     let ip = std::env::var("IP").expect("Переменная IP не найдена");
+    
     let database_url = std::env::var("DATABASE_URL").expect("Переменная DATABASE_URL не найдена");
 
     log::debug!("Applying 'my_db' migrations on '{database_url}'...");
@@ -88,6 +93,8 @@ async fn main() -> anyhow::Result<()> {
     .route("/api/v1/author/search", get(search_author))
     // GET запрос на получение книг по author_id автора
     .route("/api/v1/author/:author_id", get(get_author_name))
+    // GET запрос на поиск количество авторов по критерию
+    .route("/api/v1/author/search/count", get(author_search_count))
     // PUT запрос на изменение имени атора
     .route("/api/v1/author/:author_id", put(update_author_name))
     // POST запрос на создание автора
@@ -95,7 +102,7 @@ async fn main() -> anyhow::Result<()> {
     // POST запрос на создание автора
     .route("/api/v1/author2", post(add_author_2)) 
     // DELETE запрос на удаление автора
-    .route("/api/v1/author/:author_id", delete(delete_author))     
+    .route("/api/v1/author/:author_id", delete(delete_author))        
     .layer(Extension(pool))
     .layer(tower_http::cors::CorsLayer::new()
         .allow_origin("*".parse::<axum::http::HeaderValue>().unwrap())
@@ -273,6 +280,42 @@ async fn search_author(  Extension(pool): Extension<PgPool>, Query(query): Query
     Ok((StatusCode::OK, Json(author)))
  }
 
+ // GET запрос: посчитать количество авторов по критериям
+async fn author_search_count(  Extension(pool): Extension<PgPool>, Query(query): Query<QueryParameters>) ->  Result<(StatusCode, Json<i32>), CustomError> { 
+    
+    // // sql-запрос
+    // let mut sql = "SELECT * FROM authors WHERE name LIKE ".to_string(); 
+    // // пропускаем через функцию escape_internal параметр запроса и URL, чтобы обезопаситься от SQLi
+    // let query_param = lib::escape_internal(&query.author_name, false); 
+    // // добавляем получившийся параметр запроса к SQL-запросу
+    // sql.push_str(&query_param);      
+
+    let sql = "SELECT COUNT(*) FROM authors WHERE country=$1".to_string();
+
+    let author= sqlx::query(&sql) 
+        .bind(query.country)         
+        .execute(&pool)
+        .await         
+        .map_err(|_| {
+           CustomError::InternalServerError
+        })?;     
+    println!("{:?}", author);
+
+    // // если в БД нет совпадений, то вернём ошибку об отсутствии таких авторов
+    // if author.is_empty() {
+    //     return Err(CustomError::AuthorNotFound)
+    // }   
+
+    // отправляю дополнительно заголовок, для того чтобы браузер не блокировал входящий json
+    // let mut headers = HeaderMap::new();
+    // headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*".parse().unwrap());    
+    // Ok((StatusCode::OK,headers, Json(author)))
+    
+    
+    Ok((StatusCode::OK, Json(5)))
+ }
+
+
 // GET запрос: получение атора по id
 async fn get_author_name(Path(author_id): Path<i32>, Extension(pool): Extension<PgPool>) -> Result<Json<Author>, CustomError> {
   
@@ -299,6 +342,7 @@ async fn get_author_name(Path(author_id): Path<i32>, Extension(pool): Extension<
 #[derive(sqlx::FromRow, Deserialize, Serialize)]
 struct NewAuthor {
     author_name: String,
+    country: String,
 }
 
 #[derive(sqlx::FromRow, Deserialize, Serialize)]
@@ -311,6 +355,7 @@ struct NewAuthor2 {
 struct Author {
     authors_id: i32,
     name: String,
+    country: String,
 }
 
 #[derive(sqlx::FromRow, Deserialize, Serialize)]
@@ -323,6 +368,12 @@ struct Book {
 #[derive(sqlx::FromRow, Deserialize, Serialize)]
 struct NewBook {
     book_name: String,
+}
+
+// параметры запроса по различным критериям
+#[derive(Debug, Deserialize, Serialize)]
+pub struct QueryParameters {   
+    country: String,
 }
 
 // перечисление для обработки ошибок
@@ -362,5 +413,4 @@ impl IntoResponse for CustomError {
         (status, headers, Json(json!({"error": error_message}))).into_response()
     }
 }
-
 

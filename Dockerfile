@@ -1,9 +1,17 @@
-FROM rust:1.67
+FROM rust:1.69-buster as builder
 
-COPY . .
-WORKDIR .
+WORKDIR /app
 
+ARG DATABASE_URL
 
-EXPOSE 127.0.0.1:3000
+ENV DATABASE_URL=$DATABASE_URL
 
-CMD ["cargo", "run"]
+COPY . . 
+
+RUN cargo build --release
+
+FROM debian:buster-slim
+
+WORKDIR /usr/local/bin
+
+COPY --from=builder /app/target/release/db .
