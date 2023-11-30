@@ -281,7 +281,7 @@ async fn search_author(  Extension(pool): Extension<PgPool>, Query(query): Query
  }
 
  // GET запрос: посчитать количество авторов по критериям
-async fn author_search_count(  Extension(pool): Extension<PgPool>, Query(query): Query<QueryParameters>) ->  Result<(StatusCode, Json<i32>), CustomError> { 
+async fn author_search_count(  Extension(pool): Extension<PgPool>, Query(query): Query<QueryParameters>) ->  Result<(StatusCode, Json<i64>), CustomError> { 
     
     // // sql-запрос
     // let mut sql = "SELECT * FROM authors WHERE name LIKE ".to_string(); 
@@ -292,14 +292,14 @@ async fn author_search_count(  Extension(pool): Extension<PgPool>, Query(query):
 
     let sql = "SELECT COUNT(*) FROM authors WHERE country=$1".to_string();
 
-    let author= sqlx::query(&sql) 
+    let row: (i64,) = sqlx::query_as(&sql) 
         .bind(query.country)         
-        .execute(&pool)
+        .fetch_one(&pool)
         .await         
         .map_err(|_| {
            CustomError::InternalServerError
         })?;     
-    println!("{:?}", author);
+    println!("{row:?}");
 
     // // если в БД нет совпадений, то вернём ошибку об отсутствии таких авторов
     // if author.is_empty() {
@@ -312,7 +312,7 @@ async fn author_search_count(  Extension(pool): Extension<PgPool>, Query(query):
     // Ok((StatusCode::OK,headers, Json(author)))
     
     
-    Ok((StatusCode::OK, Json(5)))
+    Ok((StatusCode::OK, Json(row.0)))
  }
 
 
