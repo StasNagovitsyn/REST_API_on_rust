@@ -1,5 +1,5 @@
-use serde::Deserialize;
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+// use std::collections::HashMap;
 
 #[tokio::main]
 async fn main()->Result<(), Box<dyn std::error::Error>> {
@@ -43,10 +43,10 @@ async fn all_authors() -> Result<(), Box<dyn std::error::Error>> {
 async fn all_authors_json() -> Result<(), Box<dyn std::error::Error>> {
     let res = reqwest::get("http://127.0.0.1:3000/api/v1/authors").await?;
 
-    let body: Vec<Authors> = res.json::<Vec<Authors>>().await?;
+    let body: Vec<Author> = res.json::<Vec<Author>>().await?;
 
     for author in body {
-        println!("author_id = {:?}, name = {:?}", author.authors_id, author.name);
+        println!("name = {:?}, country = {:?}", author.name, author.country);
     }
     
     println!("--------------------------------");
@@ -54,10 +54,17 @@ async fn all_authors_json() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+// post-запрос на добавление автора
 async fn add_author() -> Result<(), Box<dyn std::error::Error>> {
 
-    let mut author = HashMap::new();
-    author.insert("author_name", "name_author");
+    // let mut author = HashMap::new();
+    // author.insert("author_name", "name_author");
+    let author = Author {
+        authors_id: None,
+        name: "SSSSSSSSSSSSSSSSSS".to_string(),
+        country: 1,
+    };
+    
 
     let client = reqwest::Client::new();
     // let res = client.post("http://localhost:3000/api/v1/author").header(reqwest::header::CONTENT_TYPE, "application/json").json(&author).send().await?;
@@ -75,8 +82,9 @@ async fn add_author() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-#[derive(Deserialize)]
-struct Authors {
-    authors_id: i32,
+#[derive(Deserialize, Serialize)]
+struct Author {
+    authors_id: Option<i32>,
     name: String,
+    country: i32,
 }

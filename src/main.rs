@@ -21,6 +21,8 @@ use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, SocketAddr};
 use dotenv::dotenv;
 
+use std::collections::HashMap;
+
 //там функция escape_internal, чтобы обезопаситься от SQLi
 mod lib;
 
@@ -80,6 +82,13 @@ async fn main() -> anyhow::Result<()> {
        
     log::info!("Successfully created connection pool to '{database_url}'");
 
+
+    // получить списки
+    let mut country: HashMap<i32, String> = HashMap::new();
+    get_county( Extension(pool.clone()), &mut country);
+    println!("{:?}", country);
+    // 
+
     let app = Router::new()
     // тест. Hello? world
     .route("/", get(hello))    
@@ -128,14 +137,14 @@ async fn hello() -> Json<String>{
 // POST запрос: добывить нового автора
 async fn  add_author(Extension(pool): Extension<PgPool>, Json(author_name): Json<NewAuthor> ) -> Result<(StatusCode, Json<NewAuthor>), CustomError>{       
 
-    if author_name.author_name.is_empty() {
+    if author_name.name.is_empty() {
         return Err(CustomError::BadRequest)
     }
 
     let sql = "INSERT INTO authors(name) VALUES ($1)".to_string();
     
     let _ = sqlx::query(&sql)
-        .bind(&author_name.author_name)
+        .bind(&author_name.name)
         .execute(&pool)
         .await
         .map_err(|_| {
@@ -199,7 +208,7 @@ async fn update_author_name(Path(author_id): Path<i32>, Extension(pool): Extensi
     let sql = "UPDATE authors SET name=$1 WHERE authors_id=$2".to_string();   
 
     let _ = sqlx::query(&sql)
-        .bind(&update_author.author_name)
+        .bind(&update_author.name)
         .bind(author_id)
         .execute(&mut transaction)         
         .await
@@ -257,7 +266,7 @@ async fn search_author(  Extension(pool): Extension<PgPool>, Query(query): Query
     // sql-запрос
     let mut sql = "SELECT * FROM authors WHERE name LIKE ".to_string(); 
     // пропускаем через функцию escape_internal параметр запроса и URL, чтобы обезопаситься от SQLi
-    let query_param = lib::escape_internal(&query.author_name, false); 
+    let query_param = lib::escape_internal(&query.name, false); 
     // добавляем получившийся параметр запроса к SQL-запросу
     sql.push_str(&query_param);      
 
@@ -341,8 +350,8 @@ async fn get_author_name(Path(author_id): Path<i32>, Extension(pool): Extension<
 
 #[derive(sqlx::FromRow, Deserialize, Serialize)]
 struct NewAuthor {
-    author_name: String,
-    country: String,
+    name: String,
+    country: i32,
 }
 
 #[derive(sqlx::FromRow, Deserialize, Serialize)]
@@ -355,7 +364,7 @@ struct NewAuthor2 {
 struct Author {
     authors_id: i32,
     name: String,
-    country: String,
+    country: i32,
 }
 
 #[derive(sqlx::FromRow, Deserialize, Serialize)]
@@ -373,8 +382,17 @@ struct NewBook {
 // параметры запроса по различным критериям
 #[derive(Debug, Deserialize, Serialize)]
 pub struct QueryParameters {   
+    country: i32,
+}
+
+// список стран
+#[derive(sqlx::FromRow, Deserialize, Serialize)]
+pub struct Country { 
+    id: i32,  
     country: String,
 }
+
+
 
 // перечисление для обработки ошибок
 enum CustomError {
@@ -414,3 +432,21 @@ impl IntoResponse for CustomError {
     }
 }
 
+
+async fn get_county(Extension(pool): Extension<PgPool>, list: &mut HashMap<i32, String>) {
+    
+    let sql = "SELECT * FROM country".to_string();
+
+    let country_list = sqlx::query_as::<_, Country>(&sql)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+
+    for country in &country_list {
+        let s = &country.country;
+        list.insert(country.id, s.clone());
+    }
+
+    println!(" map = {:?}", list);
+
+}
